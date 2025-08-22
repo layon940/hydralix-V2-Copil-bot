@@ -2,6 +2,7 @@ import os
 import asyncio
 import logging
 import time
+import requests
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     ApplicationBuilder, CommandHandler, MessageHandler,
@@ -31,7 +32,6 @@ def log_event(msg):
 # ========== PYROGRAM INTEGRADO: ENVÍO DOCUMENTOS GRANDES ==========
 
 def send_large_file_pyrogram(chat_id, file_path):
-    # chat_id puede ser username, id, o @canal
     with PyroClient(PYRO_SESSION, api_id=API_ID, api_hash=API_HASH) as app:
         start = time.time()
         app.send_document(chat_id, file_path)
@@ -41,6 +41,18 @@ def send_large_file_pyrogram(chat_id, file_path):
         upload_speed = file_size / elapsed if elapsed else file_size
         upload_speed_fmt = format_speed(upload_speed)
     return upload_speed_fmt
+
+# ========== COMANDO PING ==========
+
+async def ping(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    try:
+        ip = requests.get('https://api.ipify.org').text
+        await update.message.reply_text(
+            f"🌐 La IP pública de este bot es: `{ip}`\nPuedes hacerle ping desde cualquier app externa.",
+            parse_mode="Markdown"
+        )
+    except Exception as e:
+        await update.message.reply_text(f"No se pudo obtener la IP: {str(e)}")
 
 # ========== COMANDOS PRINCIPALES ==========
 
@@ -62,6 +74,7 @@ async def ayuda(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/ayuda - Explicación general\n"
         "/ads - Envío de anuncios a todos los usuarios\n"
         "/log - Envía el archivo de log actual\n"
+        "/ping - Muestra la IP pública para ping externo\n"
     )
 
 async def ads(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -86,7 +99,6 @@ async def send_log(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ========== MANEJO DE MENSAJES ==========
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # Para anuncios
     if context.user_data.get("ads_pending") and update.effective_user.id == CREATOR_ID:
         context.user_data["ads_message"] = update.message.text
         context.user_data["ads_pending"] = False
@@ -121,7 +133,6 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 success += 1
             except Exception:
                 blocked += 1
-            # Actualiza cada 10 envíos
             if (idx+1) % 10 == 0 or idx == total-1:
                 await status_msg.edit_text(
                     f"Enviando anuncio...\n"
@@ -173,7 +184,6 @@ async def video_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     os.makedirs("./downloads", exist_ok=True)
     path = f"./downloads/{file_name}"
 
-    # Descarga desde Telegram usando Bot API (no Pyrogram, ya que el bot recibe por Bot API)
     try:
         start = time.time()
         file = await context.bot.get_file(file_id)
@@ -212,7 +222,6 @@ async def process_queue(context, update):
         download_speed_fmt = current.get("download_speed", "N/A")
         status_msg = await update.message.reply_text(f"Comenzando envío a Telegram (userbot) de {filename}...")
         log_event(f"Comenzando envío Pyrogram de {filename}")
-        # Simulación de progreso
         for i in range(0, 101, 5):
             bar = generate_progress_bar(i)
             cpu, ram, free = get_system_stats()
@@ -234,9 +243,8 @@ async def process_queue(context, update):
                 f"CPU: {cpu}% | RAM: {ram}% | FREE: {free_fmt}"
             )
             await asyncio.sleep(1)
-        # Envío real con Pyrogram
         try:
-            chat_id = CREATOR_ID  # Envía al creador, puedes cambiar esto por username/canal
+            chat_id = CREATOR_ID
             upload_speed_fmt = send_large_file_pyrogram(chat_id, path)
             await status_msg.edit_text(
                 f"✅ Envío completado: {filename}\n"
@@ -281,6 +289,7 @@ app.add_handler(CommandHandler("start", start))
 app.add_handler(CommandHandler("ayuda", ayuda))
 app.add_handler(CommandHandler("ads", ads))
 app.add_handler(CommandHandler("log", send_log))
+app.add_handler(CommandHandler("ping", ping))
 app.add_handler(MessageHandler(filters.TEXT & filters.User(CREATOR_ID), handle_message))
 app.add_handler(CallbackQueryHandler(handle_callback))
 app.add_handler(MessageHandler(universal_video_filter, video_handler))

@@ -9,7 +9,7 @@ from telegram.ext import (
 )
 from telegram.error import TelegramError
 from config import BOT_TOKEN, CREATOR_ID
-from utils.uploader import upload_video, upload_video_with_speed
+from utils.uploader import upload_video_with_speed
 from utils.progress import generate_progress_bar, get_system_stats, format_size, format_speed
 
 # Configuración logging

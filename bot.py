@@ -98,25 +98,26 @@ async def video_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("Solo el creador puede subir videos.")
         return
 
-    # Detecta si el mensaje tiene video adjunto (grabación) o documento (archivo)
     video = update.message.video
     document = update.message.document
 
-    # Caso 1: Video grabado desde Telegram
     if video:
+        file_id = video.file_id
         file_name = video.file_name or f"{video.file_id}.mp4"
         file_size = video.file_size
         mime_type = video.mime_type
-        file_id = video.file_id
-    # Caso 2: Documento (archivo de video)
-    elif document and (document.mime_type and document.mime_type.startswith("video/") or
-                       document.file_name.lower().endswith(('.mp4','.mkv','.avi','.mov','.webm'))):
+    elif document:
+        file_id = document.file_id
         file_name = document.file_name or f"{document.file_id}.mp4"
         file_size = document.file_size
         mime_type = document.mime_type
-        file_id = document.file_id
+        # Verifica si el documento es un video por MIME o por extensión
+        if not (mime_type and mime_type.startswith("video/")):
+            if not file_name.lower().endswith(('.mp4','.mkv','.avi','.mov','.webm')):
+                await update.message.reply_text("Este archivo no es un video soportado.")
+                return
     else:
-        await update.message.reply_text("Este archivo no es un video soportado.")
+        await update.message.reply_text("No se detectó video ni documento de video en el mensaje.")
         return
 
     os.makedirs("./downloads", exist_ok=True)

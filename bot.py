@@ -10,7 +10,7 @@ from telegram.ext import (
 )
 from telegram.error import TelegramError
 from pyrogram import Client as PyroClient
-from config import BOT_TOKEN, CREATOR_ID, API_ID, API_HASH, PYRO_SESSION
+from config import BOT_TOKEN, CREATOR_ID, API_ID, API_HASH, PYRO_SESSION_FILE, PYRO_SESSION_STRING
 from utils.progress import generate_progress_bar, get_system_stats, format_size, format_speed
 
 ASK_PHONE, ASK_CODE = range(2)
@@ -31,12 +31,30 @@ def log_event(msg):
     logging.info(msg)
 
 def session_file_path():
-    return f"{PYRO_SESSION}.session"
+    return f"{PYRO_SESSION_FILE}.session"
 
 # ========== PYROGRAM INTEGRADO: ENVÍO DOCUMENTOS GRANDES ==========
 
+def get_pyro_client():
+    """
+    Devuelve un cliente Pyrogram, usando session string si está definido,
+    o archivo de sesión en caso contrario.
+    """
+    if PYRO_SESSION_STRING:
+        return PyroClient(
+            session_string=PYRO_SESSION_STRING,
+            api_id=API_ID,
+            api_hash=API_HASH
+        )
+    else:
+        return PyroClient(
+            PYRO_SESSION_FILE,
+            api_id=API_ID,
+            api_hash=API_HASH
+        )
+
 def send_large_file_pyrogram(chat_id, file_path):
-    with PyroClient(PYRO_SESSION, api_id=API_ID, api_hash=API_HASH) as app:
+    with get_pyro_client() as app:
         start = time.time()
         app.send_document(chat_id, file_path)
         end = time.time()
@@ -80,13 +98,14 @@ async def create_session_start(update: Update, context: ContextTypes.DEFAULT_TYP
     if update.effective_user.id != CREATOR_ID:
         await update.message.reply_text("Solo el creador puede usar este comando.")
         return ConversationHandler.END
-    if os.path.exists(session_file_path()):
-        await update.message.reply_text(
-            "La sesión ya existe y está configurada.\n"
-            "Si quieres regenerarla, elimina el archivo usando /delete_session."
-        )
-        return ConversationHandler.END
-    await update.message.reply_text("Por favor, envíame tu número de teléfono (con código de país, ejemplo: +34611223344):")
+    await update.message.reply_text(
+        "Para usar Pyrogram como usuario y subir archivos grandes, "
+        "debes crear una sesión de usuario.\n\n"
+        "Puedes hacerlo manualmente con el script 'generate_pyrogram_session.py' "
+        "y luego pegar el session string en el archivo .env (variable PYRO_SESSION_STRING), "
+        "o usar el flujo guiado aquí.\n\n"
+        "¿Quieres crear la sesión aquí? Envía tu número de teléfono (con código de país, ejemplo: +34611223344):"
+    )
     return ASK_PHONE
 
 async def create_session_ask_phone(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -102,7 +121,7 @@ async def create_session_ask_phone(update: Update, context: ContextTypes.DEFAULT
 
     try:
         client = PyroClient(
-            PYRO_SESSION,
+            PYRO_SESSION_FILE,
             api_id=API_ID,
             api_hash=API_HASH,
             phone_number=phone,
@@ -110,10 +129,12 @@ async def create_session_ask_phone(update: Update, context: ContextTypes.DEFAULT
         )
         context.user_data["client"] = client
 
-        # CORRECCIÓN: no se pasa phone_number a start()
         await asyncio.to_thread(client.start, code_callback=code_callback)
         await asyncio.to_thread(client.disconnect)
-        await update.message.reply_text("¡Sesión creada correctamente y guardada como 'large_session.session'! Ya puedes usar el bot.")
+        await update.message.reply_text(
+            "¡Sesión creada correctamente y guardada como 'large_session.session'! "
+            "Ya puedes subir archivos grandes por Pyrogram."
+        )
     except Exception as e:
         await update.message.reply_text(f"Error creando la sesión: {str(e)}")
     return ConversationHandler.END

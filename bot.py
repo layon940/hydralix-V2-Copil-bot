@@ -110,7 +110,8 @@ async def create_session_ask_phone(update: Update, context: ContextTypes.DEFAULT
         )
         context.user_data["client"] = client
 
-        await asyncio.to_thread(client.start, phone_number=phone, code_callback=code_callback)
+        # CORRECCIÓN: no se pasa phone_number a start()
+        await asyncio.to_thread(client.start, code_callback=code_callback)
         await asyncio.to_thread(client.disconnect)
         await update.message.reply_text("¡Sesión creada correctamente y guardada como 'large_session.session'! Ya puedes usar el bot.")
     except Exception as e:

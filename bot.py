@@ -1,6 +1,7 @@
 import os
 import asyncio
 import logging
+import time
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     ApplicationBuilder, CommandHandler, MessageHandler,
@@ -8,8 +9,8 @@ from telegram.ext import (
 )
 from telegram.error import TelegramError
 from config import BOT_TOKEN, CREATOR_ID
-from utils.uploader import upload_video
-from utils.progress import generate_progress_bar, get_system_stats, format_size
+from utils.uploader import upload_video, upload_video_with_speed
+from utils.progress import generate_progress_bar, get_system_stats, format_size, format_speed
 
 # Configuración logging
 LOG_FILENAME = "hydralix.log"
@@ -158,16 +159,26 @@ async def video_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     os.makedirs("./downloads", exist_ok=True)
     path = f"./downloads/{file_name}"
 
+    # Calcular velocidad REAL de descarga desde Telegram
     try:
+        start = time.time()
         file = await context.bot.get_file(file_id)
         await file.download_to_drive(path)
+        end = time.time()
+        elapsed = end - start if end > start else 1
+        download_speed = file_size / elapsed if elapsed else file_size
+        download_speed_fmt = format_speed(download_speed)
         queue.append({
             "path": path,
             "name": file_name,
-            "size": file_size
+            "size": file_size,
+            "download_speed": download_speed_fmt
         })
-        await update.message.reply_text(f"Archivo añadido a la cola: {file_name}")
-        log_event(f"Archivo añadido a la cola: {file_name} ({file_size} bytes)")
+        await update.message.reply_text(
+            f"Archivo añadido a la cola: {file_name}\n"
+            f"Velocidad real de descarga: {download_speed_fmt}"
+        )
+        log_event(f"Archivo añadido a la cola: {file_name} ({file_size} bytes) - Descarga real: {download_speed_fmt}")
         if not processing:
             asyncio.create_task(process_queue(context, update))
     except Exception as e:
@@ -184,11 +195,10 @@ async def process_queue(context, update):
         filename = current["name"]
         path = current["path"]
         size = current["size"]
+        download_speed_fmt = current.get("download_speed", "N/A")
         status_msg = await update.message.reply_text(f"Comenzando subida de {filename}...")
         log_event(f"Comenzando subida de {filename}")
-        # Simulación de progreso con velocidad y unidad de espacio correcta
-        chunk_size = 1.2 * 1024 * 1024  # 1.2 MB en bytes
-        total_chunks = 100 // 5
+        # Simulación de progreso (puedes ajustar para mostrar más detalles si quieres)
         for i in range(0, 101, 5):
             bar = generate_progress_bar(i)
             cpu, ram, free = get_system_stats()
@@ -196,18 +206,12 @@ async def process_queue(context, update):
             size_fmt = format_size(size, show_bytes=False)
             eta = int((100-i)/5)
             elapsed = i * 0.1
-            # Calcular velocidad simulada sólo si hay tamaño de archivo
-            if size and i > 0:
-                speed = chunk_size / 1024 / 1024  # MB/s
-                speed_fmt = f"{speed:.2f} MB/s"
-            else:
-                speed_fmt = "~1.2 MB/s"
             await status_msg.edit_text(
                 f"┌ {filename}\n"
                 f"├ {bar}\n"
                 f"├ Progreso: {i}%\n"
                 f"├ Tamaño: {size_fmt}\n"
-                f"├ Velocidad: {speed_fmt}\n"
+                f"├ Velocidad descarga: {download_speed_fmt}\n"
                 f"├ ETA: {eta}s\n"
                 f"├ Transcurrido: {elapsed:.1f}s\n"
                 f"├ Acción: Subida\n"
@@ -216,10 +220,15 @@ async def process_queue(context, update):
                 f"CPU: {cpu}% | RAM: {ram}% | FREE: {free_fmt}"
             )
             await asyncio.sleep(1)
+        # Subida real y velocidad de subida
         try:
-            resp = upload_video(path)
-            await status_msg.edit_text(f"✅ Subida completada: {filename}\n{resp}")
-            log_event(f"Subida completada: {filename} | Respuesta: {resp}")
+            resp, upload_speed_fmt = upload_video_with_speed(path)
+            await status_msg.edit_text(
+                f"✅ Subida completada: {filename}\n"
+                f"{resp}\n\n"
+                f"Velocidad real de subida: {upload_speed_fmt}"
+            )
+            log_event(f"Subida completada: {filename} | Respuesta: {resp} | Subida real: {upload_speed_fmt}")
         except Exception as e:
             await status_msg.edit_text(f"❌ Error al subir {filename}: {str(e)}")
             log_event(f"Error al subir {filename}: {str(e)}")

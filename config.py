@@ -1,1 +1,3 @@
-
+BOT_TOKEN = "TU_TOKEN_DE_TELEGRAM"
+CREATOR_ID = 123456789  # Tu ID de Telegram
+VIDEO_API_URL = "http://up.hydrax.net/XXXXXXXXXXX"

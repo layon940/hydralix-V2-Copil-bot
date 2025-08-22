@@ -13,7 +13,6 @@ from pyrogram import Client as PyroClient
 from config import BOT_TOKEN, CREATOR_ID, API_ID, API_HASH, PYRO_SESSION
 from utils.progress import generate_progress_bar, get_system_stats, format_size, format_speed
 
-# --- Conversation states for session creation ---
 ASK_PHONE, ASK_CODE = range(2)
 
 LOG_FILENAME = "hydralix.log"
@@ -30,6 +29,9 @@ users = set()
 
 def log_event(msg):
     logging.info(msg)
+
+def session_file_path():
+    return f"{PYRO_SESSION}.session"
 
 # ========== PYROGRAM INTEGRADO: ENVÍO DOCUMENTOS GRANDES ==========
 
@@ -56,14 +58,33 @@ async def ping(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         await update.message.reply_text(f"No se pudo obtener la IP: {str(e)}")
 
+# ========== COMANDO /delete_session ==========
+
+async def delete_session(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id != CREATOR_ID:
+        await update.message.reply_text("Solo el creador puede usar este comando.")
+        return
+    session_path = session_file_path()
+    if os.path.exists(session_path):
+        try:
+            os.remove(session_path)
+            await update.message.reply_text("La sesión fue eliminada correctamente.")
+        except Exception as e:
+            await update.message.reply_text(f"Error eliminando la sesión: {str(e)}")
+    else:
+        await update.message.reply_text("No existe ninguna sesión para eliminar.")
+
 # ========== COMANDO /create_session ==========
 
 async def create_session_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != CREATOR_ID:
         await update.message.reply_text("Solo el creador puede usar este comando.")
         return ConversationHandler.END
-    if os.path.exists(f"{PYRO_SESSION}.session"):
-        await update.message.reply_text("La sesión ya existe y está configurada. Si quieres regenerarla, elimina el archivo primero.")
+    if os.path.exists(session_file_path()):
+        await update.message.reply_text(
+            "La sesión ya existe y está configurada.\n"
+            "Si quieres regenerarla, elimina el archivo usando /delete_session."
+        )
         return ConversationHandler.END
     await update.message.reply_text("Por favor, envíame tu número de teléfono (con código de país, ejemplo: +34611223344):")
     return ASK_PHONE
@@ -75,7 +96,6 @@ async def create_session_ask_phone(update: Update, context: ContextTypes.DEFAULT
     context.user_data["code"] = None
 
     def code_callback():
-        # Espera hasta que el usuario envíe el código por Telegram
         while context.user_data["code"] is None:
             time.sleep(1)
         return context.user_data["code"]
@@ -101,7 +121,6 @@ async def create_session_ask_code(update: Update, context: ContextTypes.DEFAULT_
     code = update.message.text.strip()
     context.user_data["code"] = code
     await update.message.reply_text("Procesando código... espera unos segundos.")
-    # No hace falta nada más aquí, el code_callback recogerá el código
     return ConversationHandler.END
 
 async def create_session_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -140,6 +159,7 @@ async def ayuda(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/log - Envía el archivo de log actual\n"
         "/ping - Muestra la IP pública para ping externo\n"
         "/create_session - Crea la sesión Pyrogram automáticamente\n"
+        "/delete_session - Elimina la sesión actual de Pyrogram\n"
     )
 
 async def ads(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -355,6 +375,7 @@ app.add_handler(CommandHandler("ayuda", ayuda))
 app.add_handler(CommandHandler("ads", ads))
 app.add_handler(CommandHandler("log", send_log))
 app.add_handler(CommandHandler("ping", ping))
+app.add_handler(CommandHandler("delete_session", delete_session))
 app.add_handler(create_session_handler)
 app.add_handler(MessageHandler(filters.TEXT & filters.User(CREATOR_ID), handle_message))
 app.add_handler(CallbackQueryHandler(handle_callback))

@@ -91,27 +91,30 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif query.data == "cancel_ads":
         await query.edit_message_text("Anuncio cancelado.")
 
-# ===================== Manejo de videos =====================
+# ===================== Manejo universal de videos y documentos de video =====================
 
 async def video_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != CREATOR_ID:
         await update.message.reply_text("Solo el creador puede subir videos.")
         return
 
+    # Detectar si el mensaje tiene video o documento
     video = update.message.video
     document = update.message.document
 
+    # Procesar video nativo de Telegram
     if video:
         file_id = video.file_id
         file_name = video.file_name or f"{video.file_id}.mp4"
         file_size = video.file_size
         mime_type = video.mime_type
+    # Procesar documento que sea video por mime o por extensión
     elif document:
         file_id = document.file_id
         file_name = document.file_name or f"{document.file_id}.mp4"
         file_size = document.file_size
         mime_type = document.mime_type
-        # Verifica si el documento es un video por MIME o por extensión
+        # Verifica por mime y/o extensión
         if not (mime_type and mime_type.startswith("video/")):
             if not file_name.lower().endswith(('.mp4','.mkv','.avi','.mov','.webm')):
                 await update.message.reply_text("Este archivo no es un video soportado.")
@@ -136,6 +139,8 @@ async def video_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             asyncio.create_task(process_queue(context, update))
     except Exception as e:
         await update.message.reply_text(f"Error descargando el archivo: {str(e)}")
+
+# ===================== Procesador de cola =====================
 
 async def process_queue(context, update):
     global processing
@@ -174,7 +179,30 @@ async def process_queue(context, update):
         queue.pop(0)
     processing = False
 
-# ===================== Configuración de Handlers =====================
+# ===================== Configuración de Handlers universales =====================
+
+# Handler para videos nativos
+video_filters = filters.VIDEO
+
+# Handler para documentos con mime de video
+doc_video_mimes = [
+    "video/mp4",
+    "video/x-matroska",
+    "video/x-msvideo",
+    "video/quicktime",
+    "video/webm"
+]
+doc_video_filters = filters.Document.MimeType(doc_video_mimes[0])
+for mime in doc_video_mimes[1:]:
+    doc_video_filters |= filters.Document.MimeType(mime)
+
+# Handler para documentos por extensión
+doc_ext_filters = filters.Document.FileExtension("mp4")
+for ext in ["mkv", "avi", "mov", "webm"]:
+    doc_ext_filters |= filters.Document.FileExtension(ext)
+
+# Handler final que acepta cualquier video/documento de video
+universal_video_filter = video_filters | doc_video_filters | doc_ext_filters
 
 app = ApplicationBuilder().token(BOT_TOKEN).build()
 app.add_handler(CommandHandler("start", start))
@@ -182,10 +210,6 @@ app.add_handler(CommandHandler("ayuda", ayuda))
 app.add_handler(CommandHandler("ads", ads))
 app.add_handler(MessageHandler(filters.TEXT & filters.User(CREATOR_ID), handle_message))
 app.add_handler(CallbackQueryHandler(handle_callback))
-app.add_handler(MessageHandler(
-    filters.VIDEO | filters.Document.VIDEO | 
-    (filters.Document.ALL & filters.Document.file_extension(["mp4", "mkv", "avi", "mov", "webm"])), 
-    video_handler
-))
+app.add_handler(MessageHandler(universal_video_filter, video_handler))
 
 app.run_polling()

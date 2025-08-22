@@ -8,8 +8,8 @@ from telegram.ext import (
     CallbackQueryHandler, ContextTypes, filters
 )
 from telegram.error import TelegramError
-from config import BOT_TOKEN, CREATOR_ID
-from utils.uploader import upload_video_with_speed
+from pyrogram import Client as PyroClient
+from config import BOT_TOKEN, CREATOR_ID, API_ID, API_HASH, PYRO_SESSION
 from utils.progress import generate_progress_bar, get_system_stats, format_size, format_speed
 
 # Configuración logging
@@ -28,6 +28,20 @@ users = set()
 def log_event(msg):
     logging.info(msg)
 
+# ========== PYROGRAM INTEGRADO: ENVÍO DOCUMENTOS GRANDES ==========
+
+def send_large_file_pyrogram(chat_id, file_path):
+    # chat_id puede ser username, id, o @canal
+    with PyroClient(PYRO_SESSION, api_id=API_ID, api_hash=API_HASH) as app:
+        start = time.time()
+        app.send_document(chat_id, file_path)
+        end = time.time()
+        file_size = os.path.getsize(file_path)
+        elapsed = end - start if end > start else 1
+        upload_speed = file_size / elapsed if elapsed else file_size
+        upload_speed_fmt = format_speed(upload_speed)
+    return upload_speed_fmt
+
 # ========== COMANDOS PRINCIPALES ==========
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -42,7 +56,7 @@ async def ayuda(update: Update, context: ContextTypes.DEFAULT_TYPE):
     log_event("/ayuda command")
     await update.message.reply_text(
         "Hydralix acepta archivos de video (mp4, mkv, avi, etc) y los sube a un servidor externo. "
-        "Solo funciona para @layon940.\n\n"
+        "Ahora soporta archivos grandes usando Pyrogram (userbot).\n\n"
         "Comandos disponibles:\n"
         "/start - Inicia el bot\n"
         "/ayuda - Explicación general\n"
@@ -125,7 +139,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_text("Anuncio cancelado.")
         log_event("Anuncio cancelado.")
 
-# ========== MANEJO UNIVERSAL DE VIDEOS ==========
+# ========== MANEJO UNIVERSAL DE VIDEOS CON PYROGRAM ==========
 
 async def video_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != CREATOR_ID:
@@ -159,7 +173,7 @@ async def video_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     os.makedirs("./downloads", exist_ok=True)
     path = f"./downloads/{file_name}"
 
-    # Calcular velocidad REAL de descarga desde Telegram
+    # Descarga desde Telegram usando Bot API (no Pyrogram, ya que el bot recibe por Bot API)
     try:
         start = time.time()
         file = await context.bot.get_file(file_id)
@@ -185,7 +199,7 @@ async def video_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(f"Error descargando el archivo: {str(e)}")
         log_event(f"Error descargando el archivo {file_name}: {str(e)}")
 
-# ========== PROCESADOR DE COLA ==========
+# ========== PROCESADOR DE COLA USANDO PYROGRAM ==========
 
 async def process_queue(context, update):
     global processing
@@ -196,9 +210,9 @@ async def process_queue(context, update):
         path = current["path"]
         size = current["size"]
         download_speed_fmt = current.get("download_speed", "N/A")
-        status_msg = await update.message.reply_text(f"Comenzando subida de {filename}...")
-        log_event(f"Comenzando subida de {filename}")
-        # Simulación de progreso (puedes ajustar para mostrar más detalles si quieres)
+        status_msg = await update.message.reply_text(f"Comenzando envío a Telegram (userbot) de {filename}...")
+        log_event(f"Comenzando envío Pyrogram de {filename}")
+        # Simulación de progreso
         for i in range(0, 101, 5):
             bar = generate_progress_bar(i)
             cpu, ram, free = get_system_stats()
@@ -214,24 +228,24 @@ async def process_queue(context, update):
                 f"├ Velocidad descarga: {download_speed_fmt}\n"
                 f"├ ETA: {eta}s\n"
                 f"├ Transcurrido: {elapsed:.1f}s\n"
-                f"├ Acción: Subida\n"
+                f"├ Acción: Envío (Pyrogram)\n"
                 f"└——————————————————\n"
                 f"▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬\n"
                 f"CPU: {cpu}% | RAM: {ram}% | FREE: {free_fmt}"
             )
             await asyncio.sleep(1)
-        # Subida real y velocidad de subida
+        # Envío real con Pyrogram
         try:
-            resp, upload_speed_fmt = upload_video_with_speed(path)
+            chat_id = CREATOR_ID  # Envía al creador, puedes cambiar esto por username/canal
+            upload_speed_fmt = send_large_file_pyrogram(chat_id, path)
             await status_msg.edit_text(
-                f"✅ Subida completada: {filename}\n"
-                f"{resp}\n\n"
+                f"✅ Envío completado: {filename}\n"
                 f"Velocidad real de subida: {upload_speed_fmt}"
             )
-            log_event(f"Subida completada: {filename} | Respuesta: {resp} | Subida real: {upload_speed_fmt}")
+            log_event(f"Envío completado Pyrogram: {filename} | Subida real: {upload_speed_fmt}")
         except Exception as e:
-            await status_msg.edit_text(f"❌ Error al subir {filename}: {str(e)}")
-            log_event(f"Error al subir {filename}: {str(e)}")
+            await status_msg.edit_text(f"❌ Error al enviar {filename} por Pyrogram: {str(e)}")
+            log_event(f"Error al enviar {filename} por Pyrogram: {str(e)}")
         queue.pop(0)
     processing = False
 

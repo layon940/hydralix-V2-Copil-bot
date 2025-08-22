@@ -22,3 +22,14 @@ def format_size(size, show_bytes=True):
         return f"{size / (1024 ** 2):.2f} MB"
     else:
         return f"{size / (1024 ** 3):.2f} GB"
+
+def format_speed(speed_bytes_per_sec):
+    # speed en bytes/s
+    if speed_bytes_per_sec < 1024:
+        return f"{speed_bytes_per_sec:.2f} B/s"
+    elif speed_bytes_per_sec < 1024 ** 2:
+        return f"{speed_bytes_per_sec / 1024:.2f} KB/s"
+    elif speed_bytes_per_sec < 1024 ** 3:
+        return f"{speed_bytes_per_sec / (1024 ** 2):.2f} MB/s"
+    else:
+        return f"{speed_bytes_per_sec / (1024 ** 3):.2f} GB/s"

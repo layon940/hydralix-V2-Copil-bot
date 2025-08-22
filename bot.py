@@ -6,9 +6,10 @@ from telegram.ext import (
     ApplicationBuilder, CommandHandler, MessageHandler,
     CallbackQueryHandler, ContextTypes, filters
 )
+from telegram.error import TelegramError
 from config import BOT_TOKEN, CREATOR_ID
 from utils.uploader import upload_video
-from utils.progress import generate_progress_bar, get_system_stats
+from utils.progress import generate_progress_bar, get_system_stats, format_size
 
 # Configuración logging
 LOG_FILENAME = "hydralix.log"
@@ -26,7 +27,7 @@ users = set()
 def log_event(msg):
     logging.info(msg)
 
-# ===================== Comandos =====================
+# ========== COMANDOS PRINCIPALES ==========
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     users.add(update.effective_user.id)
@@ -67,7 +68,7 @@ async def send_log(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         await update.message.reply_text("No existe archivo de log.")
 
-# ===================== Manejo de Mensajes =====================
+# ========== MANEJO DE MENSAJES ==========
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Para anuncios
@@ -84,7 +85,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         reply_markup = InlineKeyboardMarkup(keyboard)
         await update.message.reply_text("¿Deseas enviar este anuncio?", reply_markup=reply_markup)
 
-# ===================== Callback para anuncios =====================
+# ========== CALLBACK ANUNCIOS ==========
 
 async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -123,7 +124,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_text("Anuncio cancelado.")
         log_event("Anuncio cancelado.")
 
-# ===================== Manejo universal de videos y documentos de video =====================
+# ========== MANEJO UNIVERSAL DE VIDEOS ==========
 
 async def video_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != CREATOR_ID:
@@ -131,23 +132,19 @@ async def video_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         log_event(f"Intento de subida por usuario no autorizado: {update.effective_user.id}")
         return
 
-    # Detectar si el mensaje tiene video o documento
     video = update.message.video
     document = update.message.document
 
-    # Procesar video nativo de Telegram
     if video:
         file_id = video.file_id
         file_name = video.file_name or f"{video.file_id}.mp4"
         file_size = video.file_size
         mime_type = video.mime_type
-    # Procesar documento que sea video por mime o por extensión
     elif document:
         file_id = document.file_id
         file_name = document.file_name or f"{document.file_id}.mp4"
         file_size = document.file_size
         mime_type = document.mime_type
-        # Verifica por mime y/o extensión
         if not (mime_type and mime_type.startswith("video/")):
             if not file_name.lower().endswith(('.mp4','.mkv','.avi','.mov','.webm')):
                 await update.message.reply_text("Este archivo no es un video soportado.")
@@ -177,7 +174,7 @@ async def video_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(f"Error descargando el archivo: {str(e)}")
         log_event(f"Error descargando el archivo {file_name}: {str(e)}")
 
-# ===================== Procesador de cola =====================
+# ========== PROCESADOR DE COLA ==========
 
 async def process_queue(context, update):
     global processing
@@ -187,28 +184,38 @@ async def process_queue(context, update):
         filename = current["name"]
         path = current["path"]
         size = current["size"]
-        # Mensaje de estado
         status_msg = await update.message.reply_text(f"Comenzando subida de {filename}...")
         log_event(f"Comenzando subida de {filename}")
-        # Simulación de progreso
+        # Simulación de progreso con velocidad y unidad de espacio correcta
+        chunk_size = 1.2 * 1024 * 1024  # 1.2 MB en bytes
+        total_chunks = 100 // 5
         for i in range(0, 101, 5):
             bar = generate_progress_bar(i)
             cpu, ram, free = get_system_stats()
+            free_fmt = format_size(free)
+            size_fmt = format_size(size, show_bytes=False)
+            eta = int((100-i)/5)
+            elapsed = i * 0.1
+            # Calcular velocidad simulada sólo si hay tamaño de archivo
+            if size and i > 0:
+                speed = chunk_size / 1024 / 1024  # MB/s
+                speed_fmt = f"{speed:.2f} MB/s"
+            else:
+                speed_fmt = "~1.2 MB/s"
             await status_msg.edit_text(
                 f"┌ {filename}\n"
                 f"├ {bar}\n"
                 f"├ Progreso: {i}%\n"
-                f"├ Tamaño: {round(size/(1024**2),2)}MB\n"
-                f"├ Velocidad: ~1.2MB/s\n"
-                f"├ ETA: {int((100-i)/5)}s\n"
-                f"├ Transcurrido: {i*0.1:.1f}s\n"
+                f"├ Tamaño: {size_fmt}\n"
+                f"├ Velocidad: {speed_fmt}\n"
+                f"├ ETA: {eta}s\n"
+                f"├ Transcurrido: {elapsed:.1f}s\n"
                 f"├ Acción: Subida\n"
                 f"└——————————————————\n"
                 f"▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬\n"
-                f"CPU: {cpu}% | RAM: {ram}% | FREE: {free}GB"
+                f"CPU: {cpu}% | RAM: {ram}% | FREE: {free_fmt}"
             )
             await asyncio.sleep(1)
-        # Subida real
         try:
             resp = upload_video(path)
             await status_msg.edit_text(f"✅ Subida completada: {filename}\n{resp}")
@@ -219,12 +226,18 @@ async def process_queue(context, update):
         queue.pop(0)
     processing = False
 
-# ===================== Configuración de Handlers universales =====================
+# ========== HANDLER GLOBAL DE ERRORES ==========
 
-# Handler para videos nativos
+async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
+    log_event(f"Exception: {context.error}")
+    try:
+        if update and hasattr(update, "effective_user") and update.effective_user and update.effective_user.id == CREATOR_ID:
+            await context.bot.send_message(chat_id=CREATOR_ID, text=f"Error: {context.error}")
+    except Exception as notify_error:
+        log_event(f"Exception while notifying creator: {notify_error}")
+
+# ========== CONFIGURACION DE HANDLERS ==========
 video_filters = filters.VIDEO
-
-# Handler para documentos con mime de video
 doc_video_mimes = [
     "video/mp4",
     "video/x-matroska",
@@ -235,13 +248,9 @@ doc_video_mimes = [
 doc_video_filters = filters.Document.MimeType(doc_video_mimes[0])
 for mime in doc_video_mimes[1:]:
     doc_video_filters |= filters.Document.MimeType(mime)
-
-# Handler para documentos por extensión
 doc_ext_filters = filters.Document.FileExtension("mp4")
 for ext in ["mkv", "avi", "mov", "webm"]:
     doc_ext_filters |= filters.Document.FileExtension(ext)
-
-# Handler final que acepta cualquier video/documento de video
 universal_video_filter = video_filters | doc_video_filters | doc_ext_filters
 
 app = ApplicationBuilder().token(BOT_TOKEN).build()
@@ -252,5 +261,6 @@ app.add_handler(CommandHandler("log", send_log))
 app.add_handler(MessageHandler(filters.TEXT & filters.User(CREATOR_ID), handle_message))
 app.add_handler(CallbackQueryHandler(handle_callback))
 app.add_handler(MessageHandler(universal_video_filter, video_handler))
+app.add_error_handler(error_handler)
 
 app.run_polling()

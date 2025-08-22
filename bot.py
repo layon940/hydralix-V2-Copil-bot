@@ -97,20 +97,44 @@ async def video_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != CREATOR_ID:
         await update.message.reply_text("Solo el creador puede subir videos.")
         return
-    video = update.message.video or update.message.document
-    if video and video.mime_type and video.mime_type.startswith("video/"):
-        file = await context.bot.get_file(video.file_id)
-        os.makedirs("./downloads", exist_ok=True)
-        path = f"./downloads/{video.file_name or 'video.mp4'}"
+
+    # Detecta si el mensaje tiene video adjunto (grabación) o documento (archivo)
+    video = update.message.video
+    document = update.message.document
+
+    # Caso 1: Video grabado desde Telegram
+    if video:
+        file_name = video.file_name or f"{video.file_id}.mp4"
+        file_size = video.file_size
+        mime_type = video.mime_type
+        file_id = video.file_id
+    # Caso 2: Documento (archivo de video)
+    elif document and (document.mime_type and document.mime_type.startswith("video/") or
+                       document.file_name.lower().endswith(('.mp4','.mkv','.avi','.mov','.webm'))):
+        file_name = document.file_name or f"{document.file_id}.mp4"
+        file_size = document.file_size
+        mime_type = document.mime_type
+        file_id = document.file_id
+    else:
+        await update.message.reply_text("Este archivo no es un video soportado.")
+        return
+
+    os.makedirs("./downloads", exist_ok=True)
+    path = f"./downloads/{file_name}"
+
+    try:
+        file = await context.bot.get_file(file_id)
         await file.download_to_drive(path)
         queue.append({
             "path": path,
-            "name": video.file_name or "video.mp4",
-            "size": video.file_size
+            "name": file_name,
+            "size": file_size
         })
-        await update.message.reply_text(f"Archivo añadido a la cola: {video.file_name}")
+        await update.message.reply_text(f"Archivo añadido a la cola: {file_name}")
         if not processing:
             asyncio.create_task(process_queue(context, update))
+    except Exception as e:
+        await update.message.reply_text(f"Error descargando el archivo: {str(e)}")
 
 async def process_queue(context, update):
     global processing
@@ -157,6 +181,10 @@ app.add_handler(CommandHandler("ayuda", ayuda))
 app.add_handler(CommandHandler("ads", ads))
 app.add_handler(MessageHandler(filters.TEXT & filters.User(CREATOR_ID), handle_message))
 app.add_handler(CallbackQueryHandler(handle_callback))
-app.add_handler(MessageHandler(filters.VIDEO | filters.Document.VIDEO, video_handler))
+app.add_handler(MessageHandler(
+    filters.VIDEO | filters.Document.VIDEO | 
+    (filters.Document.ALL & filters.Document.file_extension(["mp4", "mkv", "avi", "mov", "webm"])), 
+    video_handler
+))
 
 app.run_polling()
